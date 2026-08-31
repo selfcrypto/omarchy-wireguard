@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.selfcrypto.wireguard",
+  "name": "WireGuard",
+  "version": "1.0.0",
+  "author": "Kike Ferrater",
+  "license": "MIT",
+  "description": "WireGuard tunnels from NetworkManager: bar indicator, one-click switching with a configurable default, live transfer and verified exit IP.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "WireGuard",
+    "description": "Status icon with a panel listing every WireGuard profile NetworkManager knows: switch tunnels, pick the default the switch and right-click bring up, watch live transfer and verify the exit IP.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "defaultTunnel": "",
+      "exclusive": true,
+      "refreshIntervalSec": 3
+    },
+    "schema": [
+      {
+        "key": "defaultTunnel",
+        "type": "string",
+        "label": "Default tunnel",
+        "defaultValue": "",
+        "description": "NetworkManager connection name brought up by the power switch, a right-click on the bar icon and the IPC 'on' call. Empty: the first WireGuard profile."
+      },
+      {
+        "key": "exclusive",
+        "type": "boolean",
+        "label": "One tunnel at a time",
+        "defaultValue": true,
+        "description": "Bring every other tunnel down before bringing one up. Keep it on for full-tunnel gateways."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Status refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 3
+      }
+    ]
+  }
+}
