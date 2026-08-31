@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.selfcrypto.wireguard",
   "name": "WireGuard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Kike Ferrater",
   "license": "MIT",
   "description": "WireGuard tunnels from NetworkManager: bar indicator, one-click switching with a configurable default, live transfer and verified exit IP.",
@@ -21,7 +21,8 @@
     "defaults": {
       "defaultTunnel": "",
       "exclusive": true,
-      "refreshIntervalSec": 3
+      "refreshIntervalSec": 3,
+      "notifications": true
     },
     "schema": [
       {
@@ -37,6 +38,13 @@
         "label": "One tunnel at a time",
         "defaultValue": true,
         "description": "Bring every other tunnel down before bringing one up. Keep it on for full-tunnel gateways."
+      },
+      {
+        "key": "notifications",
+        "type": "boolean",
+        "label": "Desktop notifications",
+        "defaultValue": true,
+        "description": "Toast after every connect, switch, disconnect or failure. The connect toast reports the exit IP once fetched and flags a mismatch with the gateway."
       },
       {
         "key": "refreshIntervalSec",

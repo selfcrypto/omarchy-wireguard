@@ -19,6 +19,11 @@ import qs.Ui
 // a right-click on the icon and the IPC `on` call bring up: star a row (or
 // press d while connected), or `omarchy bar set <id> defaultTunnel <name>`.
 //
+// Every action ends in a toast (`notifications`, on by default): a connect is
+// announced with the exit IP once it has been fetched — and flagged when an
+// IP-literal endpoint does not match it, the same verdict the panel shows —
+// a disconnect plainly, a failure as critical.
+//
 // Everything runs as the user: nmcli for profiles, state and up/down (allowed
 // for the active local session by NetworkManager's default policy),
 // /sys/class/net for byte counters, one HTTPS request to Cloudflare for the
@@ -33,6 +38,7 @@ Panel {
   property var tunnels: []
   property bool discovered: false
   readonly property bool exclusive: root.setting("exclusive", true) !== false
+  readonly property bool notifications: root.setting("notifications", true) !== false
   readonly property var activeNames: {
     var out = []
     for (var i = 0; i < tunnels.length; i++) if (tunnels[i].active) out.push(tunnels[i].name)
@@ -57,6 +63,8 @@ Panel {
     return out
   }
   property bool defaultSaving: false
+  // The action in flight, so its toast can report what actually happened.
+  property var pendingAction: null
 
   property bool busy: false
   property real rxBytes: -1
@@ -80,7 +88,7 @@ Panel {
     return null
   }
   readonly property double connSince: activeInfo ? activeInfo.since : 0
-  readonly property bool hostIsIp: activeInfo !== null && /^\d{1,3}(\.\d{1,3}){3}$/.test(activeInfo.host)
+  readonly property bool hostIsIp: activeInfo !== null && isIpLiteral(activeInfo.host)
   // The exit IP must be the gateway's address; anything else is wrong.
   readonly property bool ipMismatch: connected && publicIp !== "" && hostIsIp && publicIp !== activeInfo.host
   readonly property bool ipVerified: connected && publicIp !== "" && hostIsIp && publicIp === activeInfo.host
@@ -131,9 +139,10 @@ Panel {
     ipProc.running = true
   }
 
-  function runAction(argv) {
+  function runAction(argv, action) {
     if (actionProc.running) return
     busy = true
+    pendingAction = action || null
     actionProc.command = argv
     actionProc.running = true
   }
@@ -143,26 +152,67 @@ Panel {
     return false
   }
 
+  function isIpLiteral(s) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(s)) }
+
+  // The endpoint a connect toast checks the exit IP against; empty when the
+  // profile's endpoint is a hostname, which the panel does not verify either.
+  function expectedHostFor(name) {
+    for (var i = 0; i < tunnels.length; i++)
+      if (tunnels[i].name === name && isIpLiteral(tunnels[i].host)) return tunnels[i].host
+    return ""
+  }
+
+  // Detached (Util.execArgv: argv only, no shell re-tokenising) so a slow exit-IP
+  // lookup never holds the panel and back-to-back actions never lose a toast.
+  function notifyOutcome(action, ok) {
+    if (!notifications || !action) return
+    var glyph = "󰖂"
+    if (action.kind === "connect") {
+      if (!ok) {
+        Util.execArgv(["omarchy-notification-send", "-u", "critical", "-g", glyph, "WireGuard",
+                       action.name + " failed to come up — left disconnected"])
+        return
+      }
+      var lead = (action.switched ? "Switched to " : "Connected to ") + action.name
+      Util.execArgv(["sh", "-c",
+        "ip=$(curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p'); u=normal; " +
+        "if [ -z \"$ip\" ]; then body=\"$1 · exit IP not verified\"; " +
+        "elif [ -n \"$3\" ] && [ \"$ip\" != \"$3\" ]; then body=\"$1 · exit IP $ip, expected $3\"; u=critical; " +
+        "else body=\"$1 · exit IP $ip\"; fi; " +
+        "exec omarchy-notification-send -u \"$u\" -g \"$2\" WireGuard \"$body\"",
+        "_", lead, glyph, expectedHostFor(action.name)])
+      return
+    }
+    var names = action.names.join(", ")
+    Util.execArgv(ok
+      ? ["omarchy-notification-send", "-u", "normal", "-g", glyph, "WireGuard", "Disconnected from " + names]
+      : ["omarchy-notification-send", "-u", "critical", "-g", glyph, "WireGuard", "Could not bring down " + names])
+  }
+
   // Names travel as arguments, never inside the script, so any profile name
   // NetworkManager accepts is safe here.
   function connectTo(name) {
     if (!knownTunnel(name) || name === activeTunnel) return
     var others = []
     if (exclusive) for (var i = 0; i < activeNames.length; i++) if (activeNames[i] !== name) others.push(activeNames[i])
+    // A tunnel that fails to activate is taken back down, so NetworkManager
+    // is not left retrying what the user just watched fail.
     runAction(["sh", "-c",
       "target=$1; shift; for x in \"$@\"; do nmcli -w 10 connection down \"$x\" >/dev/null 2>&1; done; " +
-      "nmcli -w 20 connection up \"$target\" >/dev/null 2>&1",
-      "_", name].concat(others))
+      "nmcli -w 20 connection up \"$target\" >/dev/null 2>&1 || { nmcli connection down \"$target\" >/dev/null 2>&1; exit 1; }",
+      "_", name].concat(others),
+      { kind: "connect", name: name, switched: others.length > 0 })
   }
 
   function disconnectFrom(name) {
     if (activeNames.indexOf(name) === -1) return
-    runAction(["nmcli", "-w", "10", "connection", "down", name])
+    runAction(["nmcli", "-w", "10", "connection", "down", name], { kind: "disconnect", names: [name] })
   }
 
   function disconnectAll() {
     if (!connected) return
-    runAction(["sh", "-c", "for x in \"$@\"; do nmcli -w 10 connection down \"$x\" >/dev/null 2>&1; done", "_"].concat(activeNames))
+    runAction(["sh", "-c", "rc=0; for x in \"$@\"; do nmcli -w 10 connection down \"$x\" >/dev/null 2>&1 || rc=1; done; exit $rc", "_"].concat(activeNames),
+      { kind: "disconnect", names: activeNames.slice() })
   }
 
   function togglePower() { connected ? disconnectAll() : connectTo(defaultTunnel) }
@@ -255,7 +305,12 @@ Panel {
 
   Process {
     id: actionProc
-    onExited: root.refresh()
+    onExited: (exitCode, exitStatus) => {
+      var action = root.pendingAction
+      root.pendingAction = null
+      root.refresh()
+      root.notifyOutcome(action, exitCode === 0 && exitStatus === 0)
+    }
   }
 
   Process {

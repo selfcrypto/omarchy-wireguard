@@ -24,6 +24,8 @@ nmcli connection import type wireguard file my-gateway.conf
 - Live download/upload rate and totals for the active tunnel.
 - Exit-IP check against the profile's peer endpoint: "verified" when the
   public address is the gateway, "unexpected!" when it is not.
+- A toast after every action: connect and switch report the exit IP (and
+  flag a mismatch), disconnect and failures say so plainly. Can be turned off.
 - Keyboard-driven panel and full IPC control.
 
 ## Installation
@@ -69,6 +71,7 @@ set with `omarchy bar set`:
 ```bash
 omarchy bar set io.github.selfcrypto.wireguard defaultTunnel my-gateway
 omarchy bar set io.github.selfcrypto.wireguard exclusive false --json
+omarchy bar set io.github.selfcrypto.wireguard notifications false --json
 omarchy bar set io.github.selfcrypto.wireguard refreshIntervalSec 5
 ```
 
@@ -76,6 +79,7 @@ omarchy bar set io.github.selfcrypto.wireguard refreshIntervalSec 5
 |---|---|---|
 | `defaultTunnel` | NetworkManager connection name the switch / right-click / `on` bring up | first profile |
 | `exclusive` | bring every other tunnel down before bringing one up | `true` |
+| `notifications` | toast after every connect, switch, disconnect or failure | `true` |
 | `refreshIntervalSec` | status poll interval, 2–60 s | `3` |
 
 ## IPC
