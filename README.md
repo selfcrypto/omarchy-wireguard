@@ -10,6 +10,10 @@ Nothing to configure. Import a profile and it appears:
 nmcli connection import type wireguard file my-gateway.conf
 ```
 
+## Preview
+
+![WireGuard panel: tunnel list with default star, exit IP and key hints](preview.png)
+
 ## Features
 
 - Every NetworkManager WireGuard profile, discovered automatically.
