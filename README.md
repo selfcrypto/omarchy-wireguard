@@ -97,13 +97,36 @@ omarchy-shell io.github.selfcrypto.wireguard toggle          # the panel
 ## Requirements and dependencies
 
 - NetworkManager with WireGuard profiles (`nmcli`); `curl` for the exit-IP
-  check. Both ship with Omarchy.
+  check; `sh` and `timeout` (coreutils). All ship with Omarchy.
 - Runs entirely as the user: NetworkManager's default policy lets the active
   local session bring its connections up and down, so no polkit prompt.
 - One external request: the exit IP comes from `https://1.1.1.1/cdn-cgi/trace`
   (Cloudflare), only while the panel is open or a tunnel changes.
 - The exit-IP verdict is only given when the profile's endpoint is an IP
   literal; a hostname endpoint shows the address without a verdict.
+
+## How it runs things
+
+Every external command goes through `wg-helper.sh`, one process per
+operation, as `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`:
+
+- **Deadlines.** Each operation has a wall-clock limit that covers its whole
+  process group (`timeout` runs the helper as a group leader and signals the
+  group, then kills it). Discovery 10 s, byte counters 5 s, exit IP 10 s, a
+  switch 40 s plus 10 s per extra tunnel to bring down, toasts 15 s.
+- **Fixed argv.** Tunnel names travel as arguments, never inside a script,
+  and only names returned by the last discovery are passed on.
+- **Bounded, validated output.** Discovery lists at most 32 profiles, clips
+  names to 256 bytes and endpoints to 253, accepts interface names only when
+  they satisfy the kernel's own rules (1–15 bytes, no `/`, `:` or whitespace)
+  before touching `/sys/class/net`, and emits JSON. The widget re-validates
+  every field it parses.
+- **Exit IP.** HTTPS only, no redirects, 3 s connect and 6 s total deadline,
+  4 KiB response cap in `curl` and again in the reader; the value is used
+  only when the trace carries exactly one `ip=` line holding a canonical
+  IPv4 address.
+- **Text from outside** (names, endpoints, the exit IP) is rendered as plain
+  text, capped and elided; IPC replies are bounded by the same limits.
 
 ## License
 

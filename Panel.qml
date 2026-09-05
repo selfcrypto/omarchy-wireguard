@@ -27,7 +27,13 @@ import qs.Ui
 // Everything runs as the user: nmcli for profiles, state and up/down (allowed
 // for the active local session by NetworkManager's default policy),
 // /sys/class/net for byte counters, one HTTPS request to Cloudflare for the
-// exit IP.
+// exit IP. All of it goes through wg-helper.sh, one supervised process per
+// operation: `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`, so
+// every call has a wall-clock deadline over its whole process group, fixed
+// argv, and output that is validated and bounded before it gets here (profile
+// count, name and host length, interface-name syntax, one canonical IPv4).
+// The widget re-checks what it parses and treats every string that came from
+// NetworkManager or the network as plain text of bounded length.
 Panel {
   id: root
   moduleName: "io.github.selfcrypto.wireguard"
@@ -37,6 +43,27 @@ Panel {
   // Straight from NetworkManager: [{ name, active, iface, host, since }].
   property var tunnels: []
   property bool discovered: false
+
+  // Limits, mirrored in wg-helper.sh: what is accepted from the helper and
+  // what is handed to text sinks and IPC callers.
+  readonly property int maxProfiles: 32
+  readonly property int maxNameChars: 256
+  readonly property int maxLabelChars: 64      // a name as displayed
+  readonly property int maxLineChars: 300      // a tooltip, hero line or toast
+  readonly property int maxIpcChars: 32768     // an IPC reply
+
+  readonly property string helper: decodeURIComponent(String(Qt.resolvedUrl("wg-helper.sh")).replace(/^file:\/\//, ""))
+  // Every external command: deadline over the whole process group, then KILL.
+  function supervised(seconds, args) {
+    return ["timeout", "-k", "3", String(seconds), "sh", root.helper].concat(args)
+  }
+
+  function isIface(s) { return /^[^\/:\s]{1,15}$/.test(String(s)) && s !== "." && s !== ".." }
+  function isHost(s) { return /^[\[\]A-Za-z0-9.:-]{1,253}$/.test(String(s)) }
+  function isName(s) { return typeof s === "string" && s.length > 0 && s.length <= maxNameChars && !/[\x00-\x1f\x7f]/.test(s) }
+  function clip(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "…" : s }
+  function label(name) { return clip(name, maxLabelChars) }
+  function labels(names) { return clip(names.map(label).join(", "), maxLineChars) }
   readonly property bool exclusive: root.setting("exclusive", true) !== false
   readonly property bool notifications: root.setting("notifications", true) !== false
   readonly property var activeNames: {
@@ -127,9 +154,8 @@ Panel {
   }
 
   function sampleTraffic() {
-    if (!connected || trafficProc.running) return
-    var base = "/sys/class/net/" + activeInfo.iface + "/statistics/"
-    trafficProc.command = ["sh", "-c", "cat \"$1\" \"$2\" 2>/dev/null", "_", base + "rx_bytes", base + "tx_bytes"]
+    if (!connected || trafficProc.running || !isIface(activeInfo.iface)) return
+    trafficProc.command = supervised(5, ["stats", activeInfo.iface])
     trafficProc.running = true
   }
 
@@ -152,7 +178,8 @@ Panel {
     return false
   }
 
-  function isIpLiteral(s) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(s)) }
+  // Canonical IPv4 only: four octets 0-255, no leading zeros.
+  function isIpLiteral(s) { return /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(String(s)) }
 
   // The endpoint a connect toast checks the exit IP against; empty when the
   // profile's endpoint is a hostname, which the panel does not verify either.
@@ -163,55 +190,45 @@ Panel {
   }
 
   // Detached (Util.execArgv: argv only, no shell re-tokenising) so a slow exit-IP
-  // lookup never holds the panel and back-to-back actions never lose a toast.
+  // lookup never holds the panel and back-to-back actions never lose a toast;
+  // still under its own `timeout`, so the lookup cannot outlive its deadline.
   function notifyOutcome(action, ok) {
     if (!notifications || !action) return
-    var glyph = "󰖂"
     if (action.kind === "connect") {
       if (!ok) {
-        Util.execArgv(["omarchy-notification-send", "-u", "critical", "-g", glyph, "WireGuard",
-                       action.name + " failed to come up — left disconnected"])
+        Util.execArgv(supervised(5, ["notify", "critical", label(action.name) + " failed to come up — left disconnected"]))
         return
       }
-      var lead = (action.switched ? "Switched to " : "Connected to ") + action.name
-      Util.execArgv(["sh", "-c",
-        "ip=$(curl -4 -s -m 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p'); u=normal; " +
-        "if [ -z \"$ip\" ]; then body=\"$1 · exit IP not verified\"; " +
-        "elif [ -n \"$3\" ] && [ \"$ip\" != \"$3\" ]; then body=\"$1 · exit IP $ip, expected $3\"; u=critical; " +
-        "else body=\"$1 · exit IP $ip\"; fi; " +
-        "exec omarchy-notification-send -u \"$u\" -g \"$2\" WireGuard \"$body\"",
-        "_", lead, glyph, expectedHostFor(action.name)])
+      var lead = (action.switched ? "Switched to " : "Connected to ") + label(action.name)
+      Util.execArgv(supervised(15, ["notify-connect", lead, expectedHostFor(action.name)]))
       return
     }
-    var names = action.names.join(", ")
-    Util.execArgv(ok
-      ? ["omarchy-notification-send", "-u", "normal", "-g", glyph, "WireGuard", "Disconnected from " + names]
-      : ["omarchy-notification-send", "-u", "critical", "-g", glyph, "WireGuard", "Could not bring down " + names])
+    var names = labels(action.names)
+    Util.execArgv(supervised(5, ok
+      ? ["notify", "normal", "Disconnected from " + names]
+      : ["notify", "critical", "Could not bring down " + names]))
   }
 
-  // Names travel as arguments, never inside the script, so any profile name
-  // NetworkManager accepts is safe here.
+  // Names travel as arguments, never inside a script, and only names that
+  // came out of the last discovery are ever passed on.
   function connectTo(name) {
     if (!knownTunnel(name) || name === activeTunnel) return
     var others = []
     if (exclusive) for (var i = 0; i < activeNames.length; i++) if (activeNames[i] !== name) others.push(activeNames[i])
-    // A tunnel that fails to activate is taken back down, so NetworkManager
-    // is not left retrying what the user just watched fail.
-    runAction(["sh", "-c",
-      "target=$1; shift; for x in \"$@\"; do nmcli -w 10 connection down \"$x\" >/dev/null 2>&1; done; " +
-      "nmcli -w 20 connection up \"$target\" >/dev/null 2>&1 || { nmcli connection down \"$target\" >/dev/null 2>&1; exit 1; }",
-      "_", name].concat(others),
+    // Others down (10 s each), target up (20 s), a failed target down again
+    // (10 s): the deadline covers the worst case of the exclusive switch.
+    runAction(supervised(30 + 10 * (others.length + 1), ["up", name].concat(others)),
       { kind: "connect", name: name, switched: others.length > 0 })
   }
 
   function disconnectFrom(name) {
     if (activeNames.indexOf(name) === -1) return
-    runAction(["nmcli", "-w", "10", "connection", "down", name], { kind: "disconnect", names: [name] })
+    runAction(supervised(15, ["down", name]), { kind: "disconnect", names: [name] })
   }
 
   function disconnectAll() {
     if (!connected) return
-    runAction(["sh", "-c", "rc=0; for x in \"$@\"; do nmcli -w 10 connection down \"$x\" >/dev/null 2>&1 || rc=1; done; exit $rc", "_"].concat(activeNames),
+    runAction(supervised(5 + 10 * activeNames.length, ["down"].concat(activeNames)),
       { kind: "disconnect", names: activeNames.slice() })
   }
 
@@ -223,35 +240,44 @@ Panel {
   function setDefault(name) {
     if (name === defaultTunnel || defaultProc.running || !knownTunnel(name)) return
     defaultSaving = true
-    defaultProc.command = ["omarchy", "bar", "set", root.moduleName, "defaultTunnel", name]
+    defaultProc.command = ["timeout", "-k", "3", "15", "omarchy", "bar", "set", root.moduleName, "defaultTunnel", name]
     defaultProc.running = true
   }
 
+  // Bounded by construction (at most maxProfiles entries of capped fields);
+  // the hard ceiling is there so no reply can grow past it regardless.
   function tunnelsJson() {
-    return JSON.stringify({ exclusive: exclusive, defaultTunnel: defaultTunnel, active: activeNames, tunnels: tunnels })
+    return clipIpc(JSON.stringify({ exclusive: exclusive, defaultTunnel: defaultTunnel, active: activeNames, tunnels: tunnels }))
   }
+  function clipIpc(s) { return s.length > maxIpcChars ? s.slice(0, maxIpcChars) : s }
 
   // One poll for everything: every WireGuard profile, whether it is active,
-  // its interface (for the byte counters), its peer endpoint (expected exit
-  // IP) and its last activation time.
+  // its interface while it is up (for the byte counters), its peer endpoint
+  // (expected exit IP) and its last activation time. The helper validates and
+  // clips every field; it is checked again here before it is trusted.
   Process {
     id: statusProc
-    command: ["sh", "-c",
-      "nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2==\"wireguard\"{print $1}' | while IFS= read -r n; do " +
-      "a=0; [ -n \"$(nmcli -t -f GENERAL.STATE connection show \"$n\" 2>/dev/null)\" ] && a=1; " +
-      "i=$(nmcli -g connection.interface-name connection show \"$n\" 2>/dev/null); " +
-      "e=$(nmcli -g wireguard.peers connection show \"$n\" 2>/dev/null | tr -d '\\\\' | sed -n 's/.*endpoint=\\([^: ]*\\):[0-9]*.*/\\1/p' | head -1); " +
-      "t=$(nmcli -g connection.timestamp connection show \"$n\" 2>/dev/null); " +
-      "printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$n\" \"$a\" \"${i:-$n}\" \"$e\" \"${t:-0}\"; done"]
+    command: root.supervised(10, ["list"])
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var lines = String(text).split("\n")
+        var raw = String(text)
+        if (raw.length > root.maxIpcChars * 2) { root.busy = false; return }
+        var parsed
+        try { parsed = JSON.parse(raw) } catch (e) { root.busy = false; return }
+        if (!Array.isArray(parsed)) { root.busy = false; return }
         var list = []
-        for (var i = 0; i < lines.length; i++) {
-          if (lines[i].trim() === "") continue
-          var p = lines[i].split("\t")
-          list.push({ name: p[0], active: p[1] === "1", iface: p[2] || p[0], host: p[3] || "", since: Number(p[4] || 0) })
+        for (var i = 0; i < parsed.length && list.length < root.maxProfiles; i++) {
+          var e = parsed[i]
+          if (!e || !root.isName(e.name)) continue
+          var since = Number(e.since)
+          list.push({
+            name: e.name,
+            active: e.active === true,
+            iface: root.isIface(e.iface) ? e.iface : "",
+            host: root.isHost(e.host) ? e.host : "",
+            since: isFinite(since) && since > 0 ? since : 0
+          })
         }
         var previous = root.activeTunnel
         root.tunnels = list
@@ -277,6 +303,7 @@ Panel {
         if (lines.length < 2) return
         var rx = Number(lines[0])
         var tx = Number(lines[1])
+        if (!isFinite(rx) || !isFinite(tx) || rx < 0 || tx < 0) return
         var now = Date.now()
         if (root.rxBytes >= 0 && now > root.lastSampleMs) {
           var dt = (now - root.lastSampleMs) / 1000
@@ -290,13 +317,15 @@ Panel {
     }
   }
 
+  // The helper prints one canonical IPv4 address or nothing at all.
   Process {
     id: ipProc
-    command: ["sh", "-c", "curl -4 -s -m 6 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p'"]
+    command: root.supervised(10, ["ip"])
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.publicIp = String(text).trim()
+        var ip = String(text).trim()
+        root.publicIp = root.isIpLiteral(ip) ? ip : ""
         root.ipChecking = false
       }
     }
@@ -341,14 +370,16 @@ Panel {
     onTriggered: root.nowTick++
   }
 
-  // A poll that never exits would silently stop all refreshing; reap it.
+  // `timeout` already ends every helper at its deadline; this is the belt to
+  // its braces, so a poll that somehow never exits cannot stop refreshing.
   Timer {
-    interval: 10000
+    interval: 15000
     repeat: true
     running: true
     onTriggered: {
       if (statusProc.running) statusProc.running = false
       if (trafficProc.running) trafficProc.running = false
+      if (ipProc.running) ipProc.running = false
     }
   }
 
@@ -360,7 +391,7 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { root.refresh(); return "ok" }
-    function status(): string { return root.connected ? root.activeNames.join(",") : "disconnected" }
+    function status(): string { return root.connected ? root.clipIpc(root.activeNames.join(",")) : "disconnected" }
     function list(): string { return root.tunnelsJson() }
     function on(): string { if (!root.connected) root.connectTo(root.defaultTunnel); return "ok" }
     function off(): string { root.disconnectAll(); return "ok" }
@@ -388,9 +419,9 @@ Panel {
     active: root.connected
     activeColor: root.green
     tooltipText: root.connected
-      ? "WireGuard: " + root.activeNames.join(", ")
+      ? "WireGuard: " + root.labels(root.activeNames)
       : (root.defaultTunnel !== ""
-        ? "WireGuard: disconnected · right-click → " + root.defaultTunnel
+        ? "WireGuard: disconnected · right-click → " + root.label(root.defaultTunnel)
         : "WireGuard: no profiles in NetworkManager")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.togglePower()
@@ -431,7 +462,7 @@ Panel {
           width: parent.width
           title: "WireGuard"
           meta: root.connected
-            ? "Connected to " + root.activeNames.join(", ") + root.sinceText
+            ? "Connected to " + root.labels(root.activeNames) + root.sinceText
             : (root.busy ? "Working…" : "Disconnected")
           foreground: root.foreground
           fontFamily: root.fontFamily
@@ -455,7 +486,7 @@ Panel {
 
               PanelToolTip {
                 visible: powerSwitch.containsMouse
-                text: root.connected ? "Disconnect" : "Connect to " + root.defaultTunnel
+                text: root.connected ? "Disconnect" : "Connect to " + root.label(root.defaultTunnel)
                 fontFamily: root.fontFamily
               }
             }
@@ -536,16 +567,22 @@ Panel {
                   Layout.fillWidth: true
                   spacing: 0
 
+                  // Names and endpoints come from NetworkManager: plain text,
+                  // capped and elided, never auto-detected as rich text.
                   Text {
-                    text: row.modelData.name
+                    Layout.fillWidth: true
+                    text: root.label(row.modelData.name)
+                    textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
                   }
 
                   Text {
                     Layout.fillWidth: true
                     text: row.modelData.host !== "" ? row.modelData.host : "no endpoint"
+                    textFormat: Text.PlainText
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -668,6 +705,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             text: root.ipChecking ? "checking…" : (root.publicIp !== "" ? root.publicIp : "—")
+            textFormat: Text.PlainText
             color: root.ipMismatch ? root.urgent : (root.ipVerified ? root.green : root.foreground)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
