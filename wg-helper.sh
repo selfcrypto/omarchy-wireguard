@@ -18,7 +18,10 @@
 #   down NAME...              bring every NAME down
 #   notify URGENCY BODY       desktop toast
 #   notify-connect LEAD [IP]  connect toast that reports the exit IP and flags
-#                             a mismatch with the expected gateway IP
+#                             a mismatch with the expected gateway IP, unless
+#                             the tunnel is split (internet not routed via it)
+#   route                     the interface that carries traffic to the
+#                             exit-IP probe (1.1.1.1), or nothing
 
 set -u
 
@@ -150,6 +153,22 @@ cmd_notify() {
   exec omarchy-notification-send -u "$1" -g "$GLYPH" WireGuard "$(clip "$2" "$MAX_TEXT_BYTES")"
 }
 
+# Prints the interface the kernel would use to reach the exit-IP probe, or
+# nothing. A split tunnel (AllowedIPs narrower than 0.0.0.0/0) leaves this on
+# the normal uplink, so its exit IP is legitimately not the gateway's.
+cmd_route() {
+  dev=$(ip -o -4 route get 1.1.1.1 2>/dev/null | head -c 1024 \
+        | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1)
+  valid_iface "$dev" || return 1
+  printf '%s\n' "$dev"
+}
+
+# True when IFACE is a WireGuard link.
+is_wireguard() {
+  valid_iface "$1" || return 1
+  ip -d -o link show dev "$1" 2>/dev/null | head -c 4096 | grep -q ' wireguard '
+}
+
 cmd_notify_connect() {
   lead=$(clip "$1" "$MAX_TEXT_BYTES")
   expected=${2:-}
@@ -157,7 +176,11 @@ cmd_notify_connect() {
   ip=$(cmd_ip) || ip=''
   u=normal
   if [ -z "$ip" ]; then body="$lead · exit IP not verified"
-  elif [ -n "$expected" ] && [ "$ip" != "$expected" ]; then body="$lead · exit IP $ip, expected $expected"; u=critical
+  elif [ -n "$expected" ] && [ "$ip" != "$expected" ]; then
+    dev=$(cmd_route) || dev=''
+    if [ -n "$dev" ] && ! is_wireguard "$dev"; then body="$lead · split tunnel, exit IP $ip"
+    else body="$lead · exit IP $ip, expected $expected"; u=critical
+    fi
   else body="$lead · exit IP $ip"
   fi
   exec omarchy-notification-send -u "$u" -g "$GLYPH" WireGuard "$body"
@@ -173,5 +196,6 @@ case "$cmd" in
   down)           cmd_down "$@" ;;
   notify)         [ $# -eq 2 ] || exit 64; cmd_notify "$1" "$2" ;;
   notify-connect) [ $# -ge 1 ] && [ $# -le 2 ] || exit 64; cmd_notify_connect "$@" ;;
+  route)          [ $# -eq 0 ] || exit 64; cmd_route ;;
   *)              exit 64 ;;
 esac
