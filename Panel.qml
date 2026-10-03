@@ -116,9 +116,14 @@ Panel {
   }
   readonly property double connSince: activeInfo ? activeInfo.since : 0
   readonly property bool hostIsIp: activeInfo !== null && isIpLiteral(activeInfo.host)
+  // Interface that carries internet traffic (see wg-helper.sh route). When it
+  // isn't the active tunnel, the tunnel is split and the exit IP is expected
+  // to be the normal one. Unknown routing keeps the strict check.
+  property string routeIface: ""
+  readonly property bool splitTunnel: connected && routeIface !== "" && routeIface !== activeInfo.iface
   // The exit IP must be the gateway's address; anything else is wrong.
-  readonly property bool ipMismatch: connected && publicIp !== "" && hostIsIp && publicIp !== activeInfo.host
-  readonly property bool ipVerified: connected && publicIp !== "" && hostIsIp && publicIp === activeInfo.host
+  readonly property bool ipMismatch: connected && !splitTunnel && publicIp !== "" && hostIsIp && publicIp !== activeInfo.host
+  readonly property bool ipVerified: connected && !splitTunnel && publicIp !== "" && hostIsIp && publicIp === activeInfo.host
   readonly property string sinceText: {
     var t = nowTick
     if (!connected || !connSince) return ""
@@ -160,6 +165,7 @@ Panel {
   }
 
   function checkIp() {
+    if (!routeProc.running) routeProc.running = true
     if (ipProc.running) return
     ipChecking = true
     ipProc.running = true
@@ -330,6 +336,19 @@ Panel {
       }
     }
     onExited: root.ipChecking = false
+  }
+
+  // The helper prints one interface name or nothing at all.
+  Process {
+    id: routeProc
+    command: root.supervised(5, ["route"])
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var dev = String(text).trim()
+        root.routeIface = root.isIface(dev) ? dev : ""
+      }
+    }
   }
 
   Process {
@@ -714,8 +733,8 @@ Panel {
 
           Text {
             visible: root.connected && root.publicIp !== "" && !root.ipChecking && root.hostIsIp
-            text: root.ipMismatch ? "unexpected!" : "verified"
-            color: root.ipMismatch ? root.urgent : root.green
+            text: root.splitTunnel ? "split tunnel" : (root.ipMismatch ? "unexpected!" : "verified")
+            color: root.splitTunnel ? root.dim : (root.ipMismatch ? root.urgent : root.green)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }

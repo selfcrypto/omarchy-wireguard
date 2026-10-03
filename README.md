@@ -23,9 +23,12 @@ nmcli connection import type wireguard file my-gateway.conf
   `on` call — star any row to choose it.
 - Live download/upload rate and totals for the active tunnel.
 - Exit-IP check against the profile's peer endpoint: "verified" when the
-  public address is the gateway, "unexpected!" when it is not.
+  public address is the gateway, "unexpected!" when it is not. Split tunnels
+  (internet traffic not routed through the tunnel) show "split tunnel"
+  instead, since their exit IP is legitimately the normal one.
 - A toast after every action: connect and switch report the exit IP (and
-  flag a mismatch), disconnect and failures say so plainly. Can be turned off.
+  flag a mismatch, except on a split tunnel), disconnect and failures say so
+  plainly. Can be turned off.
 - Keyboard-driven panel and full IPC control.
 
 ## Installation
@@ -112,7 +115,8 @@ operation, as `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`:
 
 - **Deadlines.** Each operation has a wall-clock limit that covers its whole
   process group (`timeout` runs the helper as a group leader and signals the
-  group, then kills it). Discovery 10 s, byte counters 5 s, exit IP 10 s, a
+  group, then kills it). Discovery 10 s, byte counters 5 s, exit IP 10 s,
+  route lookup 5 s, a
   switch 40 s plus 10 s per extra tunnel to bring down, toasts 15 s.
 - **Fixed argv.** Tunnel names travel as arguments, never inside a script,
   and only names returned by the last discovery are passed on.
