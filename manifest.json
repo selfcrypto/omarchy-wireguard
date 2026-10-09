@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.selfcrypto.wireguard",
   "name": "WireGuard",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "Kike Ferrater",
   "license": "MIT",
   "description": "WireGuard tunnels from NetworkManager: bar indicator, one-click switching with a configurable default, live transfer and verified exit IP.",
