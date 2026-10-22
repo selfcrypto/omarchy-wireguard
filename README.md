@@ -2,7 +2,7 @@
 
 WireGuard tunnels for the [Omarchy](https://omarchy.org) bar: a status icon
 with a panel that lists every WireGuard profile NetworkManager knows, switches
-between them with one click, shows live transfer and verifies the exit IP.
+between them with one click, graphs live traffic and verifies the exit IP.
 
 Nothing to configure. Import a profile and it appears:
 
