@@ -11,8 +11,8 @@ import qs.Ui
 // verification. Tunnels are discovered, not configured: every WireGuard
 // connection profile NetworkManager knows is listed, so importing one with
 // `nmcli connection import type wireguard file <name>.conf` is all it takes.
-// The expected exit IP is the profile's peer endpoint — the public address a
-// full-tunnel gateway gives you — and is only checked when it is an IP literal.
+// The expected exit IP is the profile's peer endpoint, the public address a
+// full-tunnel gateway gives you, and is only checked when it is an IP literal.
 //
 // One tunnel at a time by default (`exclusive`): bringing one up takes the
 // others down first, because two full-tunnel gateways at once route each
@@ -21,8 +21,8 @@ import qs.Ui
 // press d while connected), or `omarchy bar set <id> defaultTunnel <name>`.
 //
 // Every action ends in a toast (`notifications`, on by default): a connect is
-// announced with the exit IP once it has been fetched — and flagged when an
-// IP-literal endpoint does not match it, the same verdict the panel shows —
+// announced with the exit IP once it has been fetched (and flagged when an
+// IP-literal endpoint does not match it, the same verdict the panel shows),
 // a disconnect plainly, a failure as critical.
 //
 // Everything runs as the user: nmcli for profiles, state and up/down (allowed
@@ -99,17 +99,22 @@ Panel {
   property real txBytes: -1
   property real rxRate: 0
   property real txRate: 0
+  // Last minute of rates, oldest first, for the traffic graph.
+  readonly property int historyLength: 30
+  property var rxHistory: []
+  property var txHistory: []
   property double lastSampleMs: 0
   property string publicIp: ""
   property bool ipChecking: false
   property int nowTick: 0
 
-  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
+  // Popup colors from the theme; the accent marks a live tunnel.
+  readonly property color foreground: Commons.Color.popups.text
+  readonly property color accent: Commons.Color.accent
   readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
-  readonly property color dim: Qt.darker(foreground, 1.55)
+  readonly property color dim: Util.alpha(foreground, 0.72)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color green: "#7dc383"
-  readonly property color hoverFill: bar ? Style.hoverFillFor(bar.foreground, Commons.Color.accent) : "transparent"
+  readonly property color hoverFill: Style.hoverFillFor(foreground, accent)
 
   readonly property var activeInfo: {
     for (var i = 0; i < tunnels.length; i++) if (tunnels[i].name === activeTunnel) return tunnels[i]
@@ -137,7 +142,7 @@ Panel {
   }
 
   function fmtBytes(b) {
-    if (b < 0) return "—"
+    if (b < 0) return "0 B"
     if (b < 1024) return Math.round(b) + " B"
     if (b < 1048576) return (b / 1024).toFixed(1) + " KB"
     if (b < 1073741824) return (b / 1048576).toFixed(1) + " MB"
@@ -151,6 +156,8 @@ Panel {
     txBytes = -1
     rxRate = 0
     txRate = 0
+    rxHistory = []
+    txHistory = []
     publicIp = ""
   }
 
@@ -197,7 +204,7 @@ Panel {
     if (!notifications || !action) return
     if (action.kind === "connect") {
       if (!ok) {
-        Util.execArgv(supervised(5, ["notify", "critical", label(action.name) + " failed to come up — left disconnected"]))
+        Util.execArgv(supervised(5, ["notify", "critical", label(action.name) + " failed to come up, left disconnected"]))
         return
       }
       var lead = (action.switched ? "Switched to " : "Connected to ") + label(action.name)
@@ -237,7 +244,7 @@ Panel {
 
   // Persist through the shell's own writer so shell.json stays canonical; the
   // bar then pushes the new `settings` into this widget live, which is what
-  // flips `defaultTunnel` — no local state to keep in sync.
+  // flips `defaultTunnel`, so there is no local state to keep in sync.
   function setDefault(name) {
     if (name === defaultTunnel || defaultProc.running || !knownTunnel(name)) return
     defaultSaving = true
@@ -310,6 +317,8 @@ Panel {
           var dt = (now - root.lastSampleMs) / 1000
           root.rxRate = Math.max(0, (rx - root.rxBytes) / dt)
           root.txRate = Math.max(0, (tx - root.txBytes) / dt)
+          root.rxHistory = root.rxHistory.concat([root.rxRate]).slice(-root.historyLength)
+          root.txHistory = root.txHistory.concat([root.txRate]).slice(-root.historyLength)
         }
         root.rxBytes = rx
         root.txBytes = tx
@@ -412,13 +421,87 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // A key as printed on the keyboard, for the keys the panel answers to.
+  component KeyCap: Rectangle {
+    required property string label
+    implicitWidth: Math.max(implicitHeight, capText.implicitWidth + Style.space(8))
+    implicitHeight: capText.implicitHeight + Style.space(2)
+    radius: Math.min(Style.cornerRadius, height / 2)
+    color: "transparent"
+    border.width: 1
+    border.color: Util.alpha(root.foreground, 0.28)
+
+    Text {
+      id: capText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.label
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  // The last minute of traffic: download as a filled accent area, upload as
+  // a line, both on one scale so their sizes compare.
+  component TrafficGraph: Canvas {
+    id: graph
+    readonly property var rx: root.rxHistory
+    readonly property var tx: root.txHistory
+    onRxChanged: requestPaint()
+    onTxChanged: requestPaint()
+    onWidthChanged: requestPaint()
+
+    onPaint: {
+      var ctx = getContext("2d")
+      ctx.reset()
+      var n = root.historyLength
+      var peak = 1024
+      for (var i = 0; i < rx.length; i++) peak = Math.max(peak, rx[i], tx[i] || 0)
+      var step = width / (n - 1)
+      function yOf(v) { return height - 1 - (height - 2) * v / peak }
+      function xOf(i, len) { return width - (len - 1 - i) * step }
+
+      ctx.strokeStyle = Util.alpha(root.foreground, 0.1)
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(0, height - 0.5); ctx.lineTo(width, height - 0.5); ctx.stroke()
+      if (rx.length < 2) return
+
+      ctx.beginPath()
+      ctx.moveTo(xOf(0, rx.length), height)
+      for (var j = 0; j < rx.length; j++) ctx.lineTo(xOf(j, rx.length), yOf(rx[j]))
+      ctx.lineTo(width, height)
+      ctx.closePath()
+      ctx.fillStyle = Util.alpha(root.accent, 0.18)
+      ctx.fill()
+
+      ctx.beginPath()
+      for (var k = 0; k < rx.length; k++) {
+        if (k === 0) ctx.moveTo(xOf(k, rx.length), yOf(rx[k]))
+        else ctx.lineTo(xOf(k, rx.length), yOf(rx[k]))
+      }
+      ctx.strokeStyle = root.accent
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+
+      ctx.beginPath()
+      for (var m = 0; m < tx.length; m++) {
+        if (m === 0) ctx.moveTo(xOf(m, tx.length), yOf(tx[m]))
+        else ctx.lineTo(xOf(m, tx.length), yOf(tx[m]))
+      }
+      ctx.strokeStyle = Util.alpha(root.foreground, 0.6)
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: "󰖂"
     active: root.connected
-    activeColor: root.green
+    activeColor: root.accent
     tooltipText: root.connected
       ? "WireGuard: " + root.labels(root.activeNames)
       : (root.defaultTunnel !== ""
@@ -438,8 +521,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(300))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(460))
+    contentWidth: panel.fittedContentWidth(Style.space(360))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -457,21 +540,19 @@ Panel {
       Column {
         id: column
         width: parent.width
-        spacing: Style.space(10)
+        spacing: Style.space(12)
 
         PanelHero {
           width: parent.width
           title: "WireGuard"
-          meta: root.connected
-            ? "Connected to " + root.labels(root.activeNames) + root.sinceText
-            : (root.busy ? "Working…" : "Disconnected")
+          meta: root.busy ? "Working…"
+            : (root.connected ? "Connected" + root.sinceText : "Disconnected")
           foreground: root.foreground
           fontFamily: root.fontFamily
-          iconOpacity: root.connected ? 1.0 : 0.5
           iconComponent: Component {
             Text {
               text: "󰖂"
-              color: root.connected ? root.green : root.dim
+              color: root.connected ? root.accent : root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.display
             }
@@ -494,12 +575,153 @@ Panel {
           }
         }
 
+        // The live connection: tunnel, a minute of traffic, the exit IP.
+        Rectangle {
+          width: parent.width
+          height: liveColumn.implicitHeight + Style.space(24)
+          radius: Style.cornerRadius
+          color: Style.normalFillFor(root.foreground, root.accent)
+
+          Column {
+            id: liveColumn
+            x: Style.space(12)
+            y: Style.space(12)
+            width: parent.width - Style.space(24)
+            spacing: Style.space(10)
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(8)
+
+              // Names and endpoints come from NetworkManager: plain text,
+              // capped and elided, never auto-detected as rich text.
+              Text {
+                Layout.fillWidth: true
+                text: root.connected ? root.labels(root.activeNames)
+                  : (root.defaultTunnel !== "" ? "Not connected. t connects " + root.label(root.defaultTunnel) : "Not connected")
+                textFormat: Text.PlainText
+                color: root.connected ? root.foreground : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: root.connected
+                elide: Text.ElideRight
+              }
+
+              Text {
+                visible: root.connected && root.activeInfo !== null && root.activeInfo.host !== ""
+                text: root.activeInfo ? root.activeInfo.host : ""
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideLeft
+                Layout.maximumWidth: parent.width / 2
+              }
+            }
+
+            TrafficGraph {
+              visible: root.connected
+              width: parent.width
+              height: Style.space(56)
+            }
+
+            RowLayout {
+              visible: root.connected
+              width: parent.width
+              spacing: Style.space(6)
+
+              Text {
+                text: "↓ " + root.fmtRate(root.rxRate)
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+
+              Text {
+                text: root.fmtBytes(root.rxBytes)
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Text {
+                text: "↑ " + root.fmtRate(root.txRate)
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+
+              Text {
+                text: root.fmtBytes(root.txBytes)
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Text {
+                text: "Exit IP"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: root.ipChecking ? "checking…" : (root.publicIp !== "" ? root.publicIp : "unknown")
+                textFormat: Text.PlainText
+                color: root.ipMismatch ? root.urgent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                horizontalAlignment: Text.AlignRight
+              }
+
+              // What the exit IP says about the tunnel, in a key-cap frame.
+              Rectangle {
+                readonly property string verdict: !root.connected || root.publicIp === "" || root.ipChecking ? ""
+                  : (!root.hostIsIp ? "not checked" : (root.ipMismatch ? "unexpected" : "verified"))
+                visible: verdict !== ""
+                implicitWidth: verdictText.implicitWidth + Style.space(10)
+                implicitHeight: verdictText.implicitHeight + Style.space(4)
+                radius: Math.min(Style.cornerRadius, height / 2)
+                color: root.ipVerified ? Style.selectedAccentFill : "transparent"
+                border.width: 1
+                border.color: root.ipMismatch ? root.urgent : (root.ipVerified ? root.accent : Util.alpha(root.foreground, 0.28))
+
+                Text {
+                  id: verdictText
+                  anchors.centerIn: parent
+                  text: parent.verdict
+                  color: root.ipMismatch ? root.urgent : (root.ipVerified ? root.accent : root.dim)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                HoverHandler { id: verdictHover }
+                PanelToolTip {
+                  visible: verdictHover.hovered && !root.hostIsIp
+                  text: "The endpoint is a host name, so there is no address to compare with"
+                  fontFamily: root.fontFamily
+                }
+              }
+            }
+          }
+        }
+
         Column {
           width: parent.width
-          spacing: Style.space(2)
+          spacing: Style.space(6)
 
           PanelSectionHeader {
-            text: "TUNNELS"
+            text: "Tunnels"
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
@@ -526,101 +748,118 @@ Panel {
             topPadding: Style.space(6)
           }
 
-          Repeater {
-            model: root.orderedTunnels
-            delegate: Rectangle {
-              id: row
-              required property var modelData
-              readonly property bool isActive: modelData.active
-              readonly property bool isDefault: modelData.name === root.defaultTunnel
-              // The star sits on top of rowMouse; count its hover too so the
-              // highlight does not drop out while crossing it.
-              readonly property bool hovered: rowMouse.containsMouse || starMouse.containsMouse
-              width: column.width
-              height: Style.space(44)
-              radius: Style.cornerRadius
-              color: row.hovered ? root.hoverFill : "transparent"
+          Rectangle {
+            visible: root.tunnels.length > 0
+            width: parent.width
+            height: tunnelRows.implicitHeight
+            radius: Style.cornerRadius
+            color: Style.normalFillFor(root.foreground, root.accent)
 
-              MouseArea {
-                id: rowMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: row.isActive ? root.disconnectFrom(row.modelData.name) : root.connectTo(row.modelData.name)
-              }
+            Column {
+              id: tunnelRows
+              width: parent.width
 
-              RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: Style.space(8)
-                anchors.rightMargin: Style.space(10)
-                spacing: Style.space(10)
-
-                Rectangle {
-                  width: Style.space(8)
-                  height: Style.space(8)
-                  radius: width / 2
-                  color: row.isActive ? root.green : "transparent"
-                  border.width: row.isActive ? 0 : 1
-                  border.color: root.dim
-                }
-
-                ColumnLayout {
-                  Layout.fillWidth: true
-                  spacing: 0
-
-                  // Names and endpoints come from NetworkManager: plain text,
-                  // capped and elided, never auto-detected as rich text.
-                  Text {
-                    Layout.fillWidth: true
-                    text: root.label(row.modelData.name)
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                    elide: Text.ElideRight
-                  }
-
-                  Text {
-                    Layout.fillWidth: true
-                    text: row.modelData.host !== "" ? row.modelData.host : "no endpoint"
-                    textFormat: Text.PlainText
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
-                  }
-                }
-
-                Text {
-                  text: row.isActive ? "connected" : (row.hovered ? "switch" : "")
-                  color: row.isActive ? root.green : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                // ★ marks the default; clicking a hollow star makes that row
-                // the default without touching the connection.
-                Text {
-                  id: star
-                  text: row.isDefault ? "󰓎" : "󰓒"
-                  color: row.isDefault ? root.green : (starMouse.containsMouse ? root.foreground : root.dim)
-                  opacity: row.isDefault || starMouse.containsMouse ? 1.0 : 0.55
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
+              Repeater {
+                model: root.orderedTunnels
+                delegate: Rectangle {
+                  id: row
+                  required property var modelData
+                  required property int index
+                  readonly property bool isActive: modelData.active
+                  readonly property bool isDefault: modelData.name === root.defaultTunnel
+                  // The star sits on top of rowMouse; count its hover too so the
+                  // highlight does not drop out while crossing it.
+                  readonly property bool hovered: rowMouse.containsMouse || starMouse.containsMouse
+                  width: tunnelRows.width
+                  height: Style.space(48)
+                  radius: Style.cornerRadius
+                  color: row.hovered ? root.hoverFill : "transparent"
 
                   MouseArea {
-                    id: starMouse
+                    id: rowMouse
                     anchors.fill: parent
-                    anchors.margins: -Style.space(6)
                     hoverEnabled: true
-                    cursorShape: row.isDefault ? Qt.ArrowCursor : Qt.PointingHandCursor
-                    onClicked: root.setDefault(row.modelData.name)
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: row.isActive ? root.disconnectFrom(row.modelData.name) : root.connectTo(row.modelData.name)
                   }
 
-                  PanelToolTip {
-                    visible: starMouse.containsMouse
-                    text: row.isDefault ? "Default tunnel" : (root.defaultSaving ? "Saving…" : "Make default")
-                    fontFamily: root.fontFamily
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.space(8)
+                    anchors.rightMargin: Style.space(10)
+                    spacing: Style.space(8)
+
+                    Rectangle {
+                      Layout.preferredWidth: Style.space(30)
+                      Layout.preferredHeight: Style.space(30)
+                      radius: Style.cornerRadius
+                      color: row.isActive ? Style.selectedAccentFill : Style.normalFillFor(root.foreground, root.accent)
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: "󰖂"
+                        color: row.isActive ? root.accent : root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.icon
+                      }
+                    }
+
+                    ColumnLayout {
+                      Layout.fillWidth: true
+                      spacing: 0
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: root.label(row.modelData.name)
+                        textFormat: Text.PlainText
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        font.bold: row.isActive
+                        elide: Text.ElideRight
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: row.isActive ? "connected" : (row.modelData.host !== "" ? row.modelData.host : "no endpoint")
+                        textFormat: Text.PlainText
+                        color: row.isActive ? root.accent : root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+                    }
+
+                    KeyCap {
+                      visible: row.index < 9
+                      label: String(row.index + 1)
+                    }
+
+                    // A filled star marks the default; clicking a hollow star
+                    // makes that row the default without touching the connection.
+                    Text {
+                      id: star
+                      text: row.isDefault ? "󰓎" : "󰓒"
+                      color: row.isDefault ? root.accent : (starMouse.containsMouse ? root.foreground : root.dim)
+                      opacity: row.isDefault || starMouse.containsMouse ? 1.0 : 0.55
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+
+                      MouseArea {
+                        id: starMouse
+                        anchors.fill: parent
+                        anchors.margins: -Style.space(6)
+                        hoverEnabled: true
+                        cursorShape: row.isDefault ? Qt.ArrowCursor : Qt.PointingHandCursor
+                        onClicked: root.setDefault(row.modelData.name)
+                      }
+
+                      PanelToolTip {
+                        visible: starMouse.containsMouse
+                        text: row.isDefault ? "Default tunnel" : (root.defaultSaving ? "Saving…" : "Make default")
+                        fontFamily: root.fontFamily
+                      }
+                    }
                   }
                 }
               }
@@ -628,108 +867,32 @@ Panel {
           }
         }
 
-        PanelSeparator { width: parent.width }
+        PanelSeparator { width: parent.width; foreground: root.foreground }
 
-        ColumnLayout {
+        Flow {
           width: parent.width
-          spacing: Style.space(4)
-          visible: root.connected
+          spacing: Style.space(6)
 
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(8)
+          Repeater {
+            model: [{ key: "t", text: "connect" }, { key: "1–9", text: "tunnel" }, { key: "d", text: "default" }, { key: "r", text: "refresh" }]
+            delegate: Row {
+              id: hint
+              required property var modelData
+              spacing: Style.space(5)
+              rightPadding: Style.space(8)
 
-            Text {
-              text: "↓"
-              color: root.green
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
+              KeyCap { label: hint.modelData.key }
 
-            Text {
-              text: root.fmtRate(root.rxRate)
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-
-            Text {
-              Layout.fillWidth: true
-              text: root.fmtBytes(root.rxBytes) + " total"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignRight
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: hint.modelData.text
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
             }
           }
-
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(8)
-
-            Text {
-              text: "↑"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-
-            Text {
-              text: root.fmtRate(root.txRate)
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-
-            Text {
-              Layout.fillWidth: true
-              text: root.fmtBytes(root.txBytes) + " total"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignRight
-            }
-          }
-        }
-
-        RowLayout {
-          width: parent.width
-          spacing: Style.space(8)
-
-          Text {
-            text: "Exit IP"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Text {
-            Layout.fillWidth: true
-            text: root.ipChecking ? "checking…" : (root.publicIp !== "" ? root.publicIp : "—")
-            textFormat: Text.PlainText
-            color: root.ipMismatch ? root.urgent : (root.ipVerified ? root.green : root.foreground)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignRight
-          }
-
-          Text {
-            visible: root.connected && root.publicIp !== "" && !root.ipChecking && root.hostIsIp
-            text: root.ipMismatch ? "unexpected!" : "verified"
-            color: root.ipMismatch ? root.urgent : root.green
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-        }
-
-        Text {
-          width: parent.width
-          text: "t toggle · 1-9 tunnel · r refresh\n★ or d marks the default"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          horizontalAlignment: Text.AlignHCenter
-          wrapMode: Text.WordWrap
         }
       }
     }

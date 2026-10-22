@@ -12,7 +12,7 @@ nmcli connection import type wireguard file my-gateway.conf
 
 ## Preview
 
-![WireGuard panel: tunnel list with default star, exit IP and key hints](preview.png)
+![WireGuard panel: live traffic graph and exit IP above the tunnel list](preview.png)
 
 ## Features
 
@@ -20,10 +20,12 @@ nmcli connection import type wireguard file my-gateway.conf
 - One tunnel at a time (default): bringing one up takes the others down
   first, so two full-tunnel gateways never fight over the default route.
 - A default tunnel for the power switch, the icon's right-click and the IPC
-  `on` call — star any row to choose it.
-- Live download/upload rate and totals for the active tunnel.
+  `on` call. Star any row to choose it.
+- A graph of the last minute of download and upload for the active tunnel,
+  with the current rates and totals.
 - Exit-IP check against the profile's peer endpoint: "verified" when the
-  public address is the gateway, "unexpected!" when it is not.
+  public address is the gateway, "unexpected" when it is not, "not checked"
+  when the endpoint is a host name.
 - A toast after every action: connect and switch report the exit IP (and
   flag a mismatch), disconnect and failures say so plainly. Can be turned off.
 - Keyboard-driven panel and full IPC control.
@@ -130,4 +132,4 @@ operation, as `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

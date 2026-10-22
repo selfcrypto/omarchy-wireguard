@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.selfcrypto.wireguard",
   "name": "WireGuard",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "author": "Kike Ferrater",
   "license": "MIT",
-  "description": "WireGuard tunnels from NetworkManager: bar indicator, one-click switching with a configurable default, live transfer and verified exit IP.",
+  "description": "WireGuard tunnels from NetworkManager: bar indicator, one-click switching with a configurable default, a live traffic graph and verified exit IP.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "WireGuard",
-    "description": "Status icon with a panel listing every WireGuard profile NetworkManager knows: switch tunnels, pick the default the switch and right-click bring up, watch live transfer and verify the exit IP.",
+    "description": "Status icon with a panel listing every WireGuard profile NetworkManager knows: switch tunnels, pick the default the switch and right-click bring up, watch a live traffic graph and verify the exit IP.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",
