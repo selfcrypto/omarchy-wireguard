@@ -9,14 +9,14 @@ Budget 15 KB.
 |---|---|
 | Released | 1.2.1 (`421e4fd`), verified on the marketplace (#11122) |
 | `main` on GitHub | 1.3.0, the commit named in issue #12623 |
-| Tag `v1.3.0` | On `4ee705f`, the first 1.3.0 push; the AGENTS.md and docs fixes are after it |
+| Tag `v1.3.0` | On the commit named in #12623 (moved there on 2026-10-22) |
 | Marketplace | #12623 `[Verify]` 1.3.0: compatibility and security baseline passed, waiting for a maintainer |
 | Installed copy | Runs the 1.3.0 `Panel.qml`, copied in for the live check |
 
 ## Pending
 
 1. #12623 approved. While it is open, a push makes it stale: edit its body to the new HEAD SHA and watch the bot.
-2. Move tag `v1.3.0` to the verified commit, or leave it. Waits on Kike.
+2. Push this repo's local docs commits (status only) once #12623 is approved.
 3. After approval, `omarchy plugin update io.github.selfcrypto.wireguard` so the installed copy is clean again.
 
 ## Done
