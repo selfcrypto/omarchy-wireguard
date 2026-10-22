@@ -11,7 +11,7 @@ grep it). This file says what each file is for and where to go for a kind of cha
 | Connecting, switching, disconnecting | `Panel.qml` (`connectTo`, `disconnectFrom`, `disconnectAll`), `wg-helper.sh` (`up`, `down`) | |
 | The default tunnel | `Panel.qml` (`defaultTunnel`, `setDefault`) | README "Configuration" |
 | Traffic rates and the graph | `Panel.qml` (`trafficProc`, `rxHistory`, `TrafficGraph`), `wg-helper.sh` (`stats`) | |
-| The exit IP check | `Panel.qml` (`checkIp`, `ipProc`, `ipVerified`, `ipMismatch`), `wg-helper.sh` (`ip`) | README "Requirements" |
+| The exit IP check | `Panel.qml` (`checkIp`, `ipProc`, `ipVerified`, `ipMismatch`), `wg-helper.sh` (`ip`) | README "Requirements and dependencies" |
 | Toasts | `Panel.qml` (`notifyOutcome`), `wg-helper.sh` (`notify`, `notify-connect`) | |
 | The panel layout, key caps, footer | `Panel.qml` (`KeyCap`, the `column` under `KeyboardPanel`) | `preview.png` |
 | A panel key | `Panel.qml` (`keyCatcher` `onTextKey`) | README "Usage", footer |

@@ -8,17 +8,19 @@ Budget 15 KB.
 | Thing | State |
 |---|---|
 | Released | 1.2.1 (`421e4fd`), verified on the marketplace (#11122) |
-| `main` | 1.3.0 pushed and tagged `v1.3.0` at `4ee705f` |
+| `main` on GitHub | 1.3.0, the commit named in issue #12623 |
+| Tag `v1.3.0` | On `4ee705f`, the first 1.3.0 push; the AGENTS.md and docs fixes are after it |
+| Marketplace | #12623 `[Verify]` 1.3.0: compatibility and security baseline passed, waiting for a maintainer |
 | Installed copy | Runs the 1.3.0 `Panel.qml`, copied in for the live check |
-| Marketplace | `[Verify]` issue #12623 for `4ee705f`, waiting for the bot and a maintainer |
 
 ## Pending
 
-1. #12623 approved. Until then push nothing: a new commit makes the issue stale. This status
-   update is committed locally only.
-2. After approval, `omarchy plugin update io.github.selfcrypto.wireguard` so the installed copy is clean again.
+1. #12623 approved. While it is open, a push makes it stale: edit its body to the new HEAD SHA and watch the bot.
+2. Move tag `v1.3.0` to the verified commit, or leave it. Waits on Kike.
+3. After approval, `omarchy plugin update io.github.selfcrypto.wireguard` so the installed copy is clean again.
 
 ## Done
 
 - **2026-10-22.** 1.3.0: live card with traffic graph and exit IP tag, grouped tunnel rows with
   key caps, theme accent, new preview, em dashes removed, repo-docs layout.
+- **2026-10-22.** Marketplace rejected the first push: `AGENTS.md` was a symlink. Now a file.
