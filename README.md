@@ -105,7 +105,7 @@ omarchy-shell io.github.selfcrypto.wireguard toggle          # the panel
 - One external request: the exit IP comes from `https://1.1.1.1/cdn-cgi/trace`
   (Cloudflare), only while the panel is open or a tunnel changes.
 - The exit-IP verdict is only given when the profile's endpoint is an IP
-  literal; a hostname endpoint shows the address without a verdict.
+  literal; a hostname endpoint shows the address tagged "not checked".
 
 ## How it runs things
 
@@ -129,6 +129,10 @@ operation, as `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`:
   IPv4 address.
 - **Text from outside** (names, endpoints, the exit IP) is rendered as plain
   text, capped and elided; IPC replies are bounded by the same limits.
+
+## Working on the code
+
+Start with `CLAUDE.md`: the map of the code, the current state and the release steps.
 
 ## License
 
