@@ -4,7 +4,7 @@ WireGuard tunnels for the [Omarchy](https://omarchy.org) bar: a status icon
 with a panel that lists every WireGuard profile NetworkManager knows, switches
 between them with one click, graphs live traffic and verifies the exit IP.
 
-Nothing to configure. Import a profile and it appears:
+Profiles are found automatically. To add one:
 
 ```bash
 nmcli connection import type wireguard file my-gateway.conf
@@ -17,8 +17,8 @@ nmcli connection import type wireguard file my-gateway.conf
 ## Features
 
 - Every NetworkManager WireGuard profile, discovered automatically.
-- One tunnel at a time (default): bringing one up takes the others down
-  first, so two full-tunnel gateways never fight over the default route.
+- One tunnel at a time by default: bringing one up takes the others down
+  first, because two full-tunnel gateways break each other's routing.
 - A default tunnel for the power switch, the icon's right-click and the IPC
   `on` call. Star any row to choose it.
 - A graph of the last minute of download and upload for the active tunnel,
@@ -26,9 +26,9 @@ nmcli connection import type wireguard file my-gateway.conf
 - Exit-IP check against the profile's peer endpoint: "verified" when the
   public address is the gateway, "unexpected" when it is not, "not checked"
   when the endpoint is a host name.
-- A toast after every action: connect and switch report the exit IP (and
-  flag a mismatch), disconnect and failures say so plainly. Can be turned off.
-- Keyboard-driven panel and full IPC control.
+- A notification after every connect, switch, disconnect or failure. Connect
+  and switch report the exit IP and flag a mismatch. Can be turned off.
+- Panel keys and IPC calls for every action.
 
 ## Installation
 
@@ -57,9 +57,9 @@ omarchy plugin remove io.github.selfcrypto.wireguard
 
 ## Usage
 
-- **Left-click** the bar icon: open the panel.
-- **Right-click**: connect to the default tunnel, or disconnect.
-- **Middle-click**: refresh.
+- Left click on the bar icon opens the panel.
+- Right click connects the default tunnel, or disconnects.
+- Middle click refreshes.
 - In the panel: click a row to switch to it (or disconnect it), click the
   star to make it the default. Keys: `t` toggle, `1`–`9` pick a tunnel
   (the default is always `1`), `d` make the connected tunnel the default,
@@ -81,7 +81,7 @@ omarchy bar set io.github.selfcrypto.wireguard refreshIntervalSec 5
 |---|---|---|
 | `defaultTunnel` | NetworkManager connection name the switch / right-click / `on` bring up | first profile |
 | `exclusive` | bring every other tunnel down before bringing one up | `true` |
-| `notifications` | toast after every connect, switch, disconnect or failure | `true` |
+| `notifications` | notification after every connect, switch, disconnect or failure | `true` |
 | `refreshIntervalSec` | status poll interval, 2–60 s | `3` |
 
 ## IPC
@@ -112,23 +112,23 @@ omarchy-shell io.github.selfcrypto.wireguard toggle          # the panel
 Every external command goes through `wg-helper.sh`, one process per
 operation, as `timeout -k 3 <deadline> sh wg-helper.sh <command> args...`:
 
-- **Deadlines.** Each operation has a wall-clock limit that covers its whole
+- Deadlines: each operation has a wall-clock limit that covers its whole
   process group (`timeout` runs the helper as a group leader and signals the
   group, then kills it). Discovery 10 s, byte counters 5 s, exit IP 10 s, a
   switch 40 s plus 10 s per extra tunnel to bring down, toasts 15 s.
-- **Fixed argv.** Tunnel names travel as arguments, never inside a script,
+- Fixed argv: tunnel names travel as arguments, never inside a script,
   and only names returned by the last discovery are passed on.
-- **Bounded, validated output.** Discovery lists at most 32 profiles, clips
+- Bounded, validated output: discovery lists at most 32 profiles, clips
   names to 256 bytes and endpoints to 253, accepts interface names only when
   they satisfy the kernel's own rules (1–15 bytes, no `/`, `:` or whitespace)
   before touching `/sys/class/net`, and emits JSON. The widget re-validates
   every field it parses.
-- **Exit IP.** HTTPS only, no redirects, 3 s connect and 6 s total deadline,
+- Exit IP: HTTPS only, no redirects, 3 s connect and 6 s total deadline,
   4 KiB response cap in `curl` and again in the reader; the value is used
   only when the trace carries exactly one `ip=` line holding a canonical
   IPv4 address.
-- **Text from outside** (names, endpoints, the exit IP) is rendered as plain
-  text, capped and elided; IPC replies are bounded by the same limits.
+- Text from outside (names, endpoints, the exit IP) is shown as plain text,
+  capped and elided. IPC replies have the same limits.
 
 ## Working on the code
 
