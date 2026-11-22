@@ -558,7 +558,7 @@ Panel {
             }
           }
           trailingControl: Component {
-            ToggleSwitch {
+            AccentSwitch {
               id: powerSwitch
               checked: root.connected
               busy: root.busy

@@ -24,6 +24,7 @@ grep it). This file says what each file is for and where to go for a kind of cha
 | File | Role |
 |---|---|
 | `Panel.qml` | The widget: state from NetworkManager, panel, traffic graph, exit IP, toasts, IPC |
+| `AccentSwitch.qml` | On/off switch of the hero: stock size, accent track when on |
 | `wg-helper.sh` | One supervised process per operation; validates and clips everything it prints |
 | `manifest.json` | Plugin id, version, settings schema, marketplace descriptions |
 | `preview.png` | Marketplace image, 1920×960, from a screenshot of the panel with sample data |

@@ -48,3 +48,13 @@ Titles are never changed once cited from another file.
 **Decision.** `preview.png` is a screenshot of the real panel fed sample tunnels and documentation IP ranges (203.0.113.0/24, 198.51.100.0/24), composed at 1920×960 like Power Saving's.
 **Why.** A connected panel shows the graph; real tunnel names and addresses must not be published.
 **Alternative rejected.** Kike's own tunnels: private addresses in a public image.
+
+## 2026-11-22 · Switch with an accent track when on
+**Decision.** The panel draws its own switch, `AccentSwitch.qml` (the same file as in `omarchy-power-saving`): size and off look of the shell's `ToggleSwitch`, solid accent track and a knob in the popup background color when on.
+**Why.** Kike: the switch showed only a grey fill when on and he wants the theme accent. The stock switch takes its on color from the theme's `selected-color`, which the generated `shell.toml` writes as the foreground hex, so no property passed from outside changes it.
+**Alternative rejected.** Setting `selected-color` in the user's `shell.toml`: changes every control of the shell and only on that machine.
+
+## 2026-11-22 · Preview switches redrawn, not recaptured
+**Decision.** For the accent switch, `preview.png` keeps the earlier capture and only its on switches were redrawn in place (accent `#7aa2f7` track, `#1a1b26` knob, the capture's Tokyo Night colors, same size and position).
+**Why.** Nothing else in the panel changed, and a new capture needs the old theme and the demo state again.
+**Alternative rejected.** A full recapture: same picture, at the cost of a theme switch and demo setup on Kike's desktop.

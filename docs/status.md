@@ -17,6 +17,8 @@ Nothing.
 
 ## Done
 
+- **2026-11-22.** 1.3.1: the connect switch has an accent track when on, own component `AccentSwitch.qml`
+  (same file as Power Saving's); `preview.png` shows it (switch redrawn in place).
 - **2026-10-22.** 1.3.0: live card with traffic graph and exit IP tag, grouped tunnel rows with
   key caps, theme accent, new preview, em dashes removed, repo-docs layout.
 - **2026-10-22.** Marketplace rejected the first push: `AGENTS.md` was a symlink. Now a file.
